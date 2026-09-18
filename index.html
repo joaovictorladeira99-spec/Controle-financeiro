@@ -17,6 +17,8 @@
     <script>
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
     </script>
+    <!-- Supabase (banco de dados + autenticação online) -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
     <style>
         :root {
@@ -175,6 +177,12 @@
         .user-info { display: flex; flex-direction: column; }
         .user-name { color: #fff; font-size: 14px; font-weight: 600; }
         .user-role { font-size: 12px; color: #64748b; }
+
+        #app-shell {
+            display: flex;
+            width: 100%;
+            height: 100%;
+        }
 
         .main-content {
             flex: 1;
@@ -526,6 +534,58 @@
             .column-filters-grid { grid-template-columns: 1fr; }
             .header-title h1 { font-size: 20px; }
         }
+
+        /* ===================== TELA DE LOGIN / CADASTRO ===================== */
+
+        .auth-screen {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg-body);
+            z-index: 500;
+            padding: 20px;
+        }
+
+        .auth-card {
+            background: var(--card-bg);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-lg);
+            padding: 36px 32px;
+            width: 100%;
+            max-width: 380px;
+            text-align: center;
+        }
+
+        .auth-card h2 { font-size: 20px; margin-bottom: 6px; }
+        .auth-card p#auth-subtitle { color: var(--text-muted); font-size: 14px; margin-bottom: 24px; }
+
+        .auth-field { text-align: left; margin-bottom: 16px; }
+        .auth-field label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; color: var(--text-muted); }
+        .auth-field input {
+            width: 100%;
+            padding: 11px 14px;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            font-size: 14px;
+            background: var(--card-bg);
+            color: var(--text-main);
+        }
+
+        .auth-error {
+            background: #fdecea;
+            color: #c0392b;
+            font-size: 13px;
+            padding: 10px 12px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            text-align: left;
+        }
+
+        .auth-toggle { margin-top: 18px; font-size: 13px; color: var(--text-muted); }
+        .auth-toggle a { color: var(--primary); font-weight: 600; margin-left: 4px; text-decoration: none; }
+        .auth-toggle a:hover { text-decoration: underline; }
 
         .chart-card {
             background: var(--card-bg);
@@ -1218,6 +1278,42 @@
 </head>
 <body>
 
+    <!-- ===================== TELA DE LOGIN / CADASTRO ===================== -->
+    <div id="auth-screen" class="auth-screen">
+        <div class="auth-card">
+            <div class="brand" style="justify-content:center; margin-bottom: 24px;">
+                <div class="brand-logo"><i class="fa-solid fa-bolt"></i></div>
+                <span>FinanceOS</span>
+            </div>
+
+            <h2 id="auth-title">Entrar na sua conta</h2>
+            <p id="auth-subtitle">Seus dados ficam salvos online, com login protegido.</p>
+
+            <div id="auth-error" class="auth-error" style="display:none;"></div>
+
+            <div class="auth-field">
+                <label>E-mail</label>
+                <input type="email" id="auth-email" placeholder="voce@email.com">
+            </div>
+            <div class="auth-field">
+                <label>Senha</label>
+                <input type="password" id="auth-password" placeholder="Mínimo 6 caracteres" onkeydown="if(event.key==='Enter') handleAuthSubmit()">
+            </div>
+
+            <button class="btn-primary" style="width:100%; justify-content:center;" id="auth-submit-btn" onclick="handleAuthSubmit()">
+                Entrar
+            </button>
+
+            <p class="auth-toggle">
+                <span id="auth-toggle-text">Ainda não tem conta?</span>
+                <a href="javascript:void(0)" onclick="toggleAuthMode()" id="auth-toggle-link">Criar conta</a>
+            </p>
+        </div>
+    </div>
+
+    <!-- ===================== APP (fica oculto até o login) ===================== -->
+    <div id="app-shell" style="display:none;">
+
     <!-- OVERLAY (fecha o menu no mobile) -->
     <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
 
@@ -1876,12 +1972,180 @@
                     </div>
                 </div>
 
+                <button class="btn-primary" style="width:100%; justify-content:center; background-color: var(--text-muted); margin-bottom: 10px;" onclick="handleLogout()"><i class="fa-solid fa-right-from-bracket"></i> Sair da Conta</button>
+
                 <button class="danger-zone-btn" onclick="resetAllData()"><i class="fa-solid fa-trash"></i> Apagar Todos os Dados</button>
             </div>
         </div>
     </div>
 
+    </div>
+    <!-- fim do #app-shell -->
+
     <script>
+        // =====================================================================
+        // CONEXÃO COM O SUPABASE (banco de dados + autenticação online)
+        // =====================================================================
+        // 1) Crie um projeto em https://supabase.com
+        // 2) Vá em Project Settings > API e copie a URL e a chave "anon public"
+        // 3) Cole as duas abaixo (essa chave pública é segura para ficar aqui)
+        const SUPABASE_URL = 'https://uzmjbubmlxltfzaxjsvx.supabase.co';
+        const SUPABASE_ANON_KEY = 'sb_publishable_G9hP6_iUa__BWCVVhcWIBA_XCGZi2cG';
+
+        const supabaseClient = (SUPABASE_URL.startsWith('http'))
+            ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+            : null;
+
+        let currentUser = null;
+        let authMode = 'login'; // 'login' ou 'signup'
+
+        function toggleAuthMode() {
+            authMode = (authMode === 'login') ? 'signup' : 'login';
+            const isSignup = authMode === 'signup';
+            document.getElementById('auth-title').innerText = isSignup ? 'Criar sua conta' : 'Entrar na sua conta';
+            document.getElementById('auth-submit-btn').innerText = isSignup ? 'Criar conta' : 'Entrar';
+            document.getElementById('auth-toggle-text').innerText = isSignup ? 'Já tem conta?' : 'Ainda não tem conta?';
+            document.getElementById('auth-toggle-link').innerText = isSignup ? 'Entrar' : 'Criar conta';
+            document.getElementById('auth-error').style.display = 'none';
+        }
+
+        function showAuthError(message) {
+            const el = document.getElementById('auth-error');
+            el.innerText = message;
+            el.style.display = 'block';
+        }
+
+        async function handleAuthSubmit() {
+            if (!supabaseClient) {
+                showAuthError('Configure a SUPABASE_URL e a SUPABASE_ANON_KEY no código antes de continuar.');
+                return;
+            }
+
+            const email = document.getElementById('auth-email').value.trim();
+            const password = document.getElementById('auth-password').value;
+
+            if (!email || !password) {
+                showAuthError('Preencha e-mail e senha.');
+                return;
+            }
+
+            const btn = document.getElementById('auth-submit-btn');
+            btn.disabled = true;
+            btn.innerText = 'Aguarde...';
+
+            try {
+                if (authMode === 'signup') {
+                    const { data, error } = await supabaseClient.auth.signUp({ email, password });
+                    if (error) throw error;
+
+                    if (data.user && !data.session) {
+                        showAuthError('Conta criada! Verifique seu e-mail para confirmar antes de entrar.');
+                        btn.disabled = false;
+                        btn.innerText = 'Criar conta';
+                        return;
+                    }
+                } else {
+                    const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+                    if (error) throw error;
+                }
+
+                await onLoginSuccess();
+            } catch (err) {
+                showAuthError(err.message || 'Não foi possível continuar. Tente novamente.');
+                btn.disabled = false;
+                btn.innerText = (authMode === 'signup') ? 'Criar conta' : 'Entrar';
+            }
+        }
+
+        async function onLoginSuccess() {
+            const { data: { user } } = await supabaseClient.auth.getUser();
+            currentUser = user;
+
+            const btn = document.getElementById('auth-submit-btn');
+            if (btn) btn.innerText = 'Carregando seus dados...';
+
+            await loadCloudData();
+
+            document.getElementById('auth-screen').style.display = 'none';
+            document.getElementById('app-shell').style.display = '';
+            bootUI();
+        }
+
+        async function handleLogout() {
+            if (supabaseClient) await supabaseClient.auth.signOut();
+            location.reload();
+        }
+
+        async function checkExistingSession() {
+            if (!supabaseClient) return; // sem credenciais configuradas ainda: mostra a tela de login mesmo assim
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            if (session) {
+                currentUser = session.user;
+                await loadCloudData();
+                document.getElementById('auth-screen').style.display = 'none';
+                document.getElementById('app-shell').style.display = '';
+                bootUI();
+            }
+        }
+
+        // =====================================================================
+        // SINCRONIZAÇÃO COM O BANCO DE DADOS (tabela dados_usuario no Supabase)
+        // =====================================================================
+        // Guardamos o "db" e o "profile" inteiros como JSON numa linha por
+        // usuário. É um banco de dados de verdade (protegido por login e RLS),
+        // só que sem precisar reescrever toda a lógica interna do app: ela
+        // continua lendo/escrevendo em "db" e "profile" normalmente, e essas
+        // duas funções cuidam de levar isso pra nuvem.
+
+        async function loadCloudData() {
+            if (!supabaseClient || !currentUser) return;
+
+            const { data, error } = await supabaseClient
+                .from('dados_usuario')
+                .select('db, profile')
+                .eq('user_id', currentUser.id)
+                .maybeSingle();
+
+            if (error) {
+                console.error('Erro ao carregar dados do Supabase:', error);
+                showAuthError('Não foi possível carregar seus dados agora. Tente novamente.');
+                return;
+            }
+
+            if (data) {
+                db = Object.assign({}, defaultData, data.db || {});
+                profile = Object.assign({}, defaultProfile, data.profile || {});
+            } else {
+                // Primeiro acesso desse usuário: cria o registro dele no banco
+                db = JSON.parse(JSON.stringify(defaultData));
+                profile = JSON.parse(JSON.stringify(defaultProfile));
+                await persistToCloud();
+            }
+        }
+
+        async function persistToCloud() {
+            if (!supabaseClient || !currentUser) return;
+
+            const { error } = await supabaseClient
+                .from('dados_usuario')
+                .upsert({
+                    user_id: currentUser.id,
+                    db: db,
+                    profile: profile,
+                    atualizado_em: new Date().toISOString()
+                }, { onConflict: 'user_id' });
+
+            if (error) console.error('Erro ao salvar no Supabase:', error);
+        }
+
+        function bootUI() {
+            applyProfile();
+            saveData();
+            renderExtratos();
+        }
+
+        checkExistingSession();
+
         const defaultData = {
             banks: ['bradesco', 'picpay', 'santander'],
             categories: ['Alimentação', 'Salário', 'Serviços', 'Fatura', 'Transporte', 'Outros'],
@@ -1929,6 +2193,7 @@
 
         function saveData() {
             localStorage.setItem('financeOS_db', JSON.stringify(db));
+            persistToCloud();
             populateYearFilter();
             populateCategoryFilter();
             populateModalOptions();
@@ -2857,12 +3122,14 @@
             profile.darkMode = document.getElementById('config-dark-mode').checked;
 
             localStorage.setItem('financeOS_profile', JSON.stringify(profile));
+            persistToCloud();
             applyProfile();
         }
 
         function toggleDarkMode(checked) {
             profile.darkMode = checked;
             localStorage.setItem('financeOS_profile', JSON.stringify(profile));
+            persistToCloud();
             applyProfile();
         }
 
@@ -2873,8 +3140,11 @@
             document.body.classList.toggle('dark-mode', !!profile.darkMode);
         }
 
-        function resetAllData() {
+        async function resetAllData() {
             if (confirm('Isso vai apagar TODOS os lançamentos, extratos e configurações salvas. Deseja continuar?')) {
+                db = JSON.parse(JSON.stringify(defaultData));
+                profile = JSON.parse(JSON.stringify(defaultProfile));
+                await persistToCloud();
                 localStorage.removeItem('financeOS_db');
                 localStorage.removeItem('financeOS_profile');
                 location.reload();
