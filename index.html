@@ -178,6 +178,12 @@
         .user-name { color: #fff; font-size: 14px; font-weight: 600; }
         .user-role { font-size: 12px; color: #64748b; }
 
+        #app-shell {
+            display: flex;
+            width: 100%;
+            height: 100%;
+        }
+
         .main-content {
             flex: 1;
             overflow-y: auto;
@@ -1987,7 +1993,13 @@
         const SUPABASE_ANON_KEY = 'sb_publishable_G9hP6_iUa__BWCVVhcWIBA_XCGZi2cG';
 
         const supabaseClient = (SUPABASE_URL.startsWith('http'))
-            ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+            ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+                auth: {
+                    persistSession: false,
+                    autoRefreshToken: false,
+                    detectSessionInUrl: false
+                }
+            })
             : null;
 
         let currentUser = null;
@@ -2070,17 +2082,7 @@
             location.reload();
         }
 
-        async function checkExistingSession() {
-            if (!supabaseClient) return; // sem credenciais configuradas ainda: mostra a tela de login mesmo assim
-            const { data: { session } } = await supabaseClient.auth.getSession();
-            if (session) {
-                currentUser = session.user;
-                await loadCloudData();
-                document.getElementById('auth-screen').style.display = 'none';
-                document.getElementById('app-shell').style.display = '';
-                bootUI();
-            }
-        }
+       
 
         // =====================================================================
         // SINCRONIZAÇÃO COM O BANCO DE DADOS (tabela dados_usuario no Supabase)
@@ -2138,7 +2140,6 @@
             renderExtratos();
         }
 
-        checkExistingSession();
 
         const defaultData = {
             banks: ['bradesco', 'picpay', 'santander'],
